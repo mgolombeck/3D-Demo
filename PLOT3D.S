@@ -3,25 +3,24 @@
 *                              *
 *      BY MARC GOLOMBECK       *
 *                              *
-*   VERSION 1.1 / 09.04.2017   *
+*   VERSION 1.2 / 10.04.2017   *
 *                              *
 * NEEDS THE FOLLOWING DATA     *
 * ALREADY LOADED INTO MEMORY:  *
 *                              *
-* $7000: SIN/COS-TABLE         *
+* $7000: SINE/COSINE-TABLE     *
 * $7200: POINT AND LINE DATA   *
 * $7400: SHAPE TABLE           *
+* $7A00: MULTIPLICATION TABLE  *
 *                              *
-* CONTROL JOYSTICK & KEYBOARD  *
+* CONTROLLED VIA JOYSTICK AND  *
+* KEYBOARD:                    *
 *                              *
 * PDL(0/1/2): ROTATION+ZOOM    *
 * PBN(0/1/2): RESET/STOP/EXIT  *
-*                              *
-* KEYS 1-5: LOAD 3D-OBJECTS 1  *
-*           TO 5 FROM DISK     *
-* KEYS +/-: ALTERNATIVE ZOOM   *
-*           IF NO PDL(2)       *
-*           AVAILABLE          *
+* KEYS 1-5  : CHOOSE 3D-OBJECT *
+* KEYS +/-  : ALTERNATE ZOOM   *
+* KEY B     : TOGGLE BENCHMARK *
 *                              *
 ********************************
 *
@@ -45,6 +44,7 @@ KYBD           EQU   $C000      ; READ KEYBOARD
 STROBE         EQU   $C010      ; CLEAR KEYBOARD
 SHNUM          EQU   $F730      ; GET ADRESS OF SHAPE NUMBER
 SHDRAW         EQU   $F605      ; DRAW SHAPE ON SCREEN
+BELL           EQU   $FBDD      ; RING BELL
 *
 SINTAB         EQU   $7000      ; BASE ADRESS OF SINE TABLE
 COSTAB         EQU   $7040      ; BASE ADRESS OF COSINE TABLE
@@ -52,10 +52,14 @@ NUMPNT         EQU   $7200      ; NUMBER OF POINTS TO DRAW
 TABLE          EQU   $7201      ; BASE ADRESS FOR POINT TABLE
 SHTAB          EQU   $7400      ; BASE ADRESS OF SHAPES-68
 SHTABPTR       EQU   $E8        ; POINTER TO SHAPE-TABLE
+SSQLO          EQU   $7A00      ; MULT TAB
+SSQHI          EQU   $7C00      ; MULT TAB
+DSQLO          EQU   $7E00      ; MULT TAB
+DSQHI          EQU   $8000      ; MULT TAB
 *
 XTRANS         EQU   $8B        ; TRANSLATION TO SCREEN CENTER
 YTRANS         EQU   $5F
-ZTRANS         EQU   $FE        ; MOVE 3D OBJECT FROM CAMERA
+ZTRANS         EQU   $FE        ; MOVE 3D OBJECT AWAY FROM CAMERA
 *
 RADIUS         EQU   $30F       ; CIRCLE RADIUS
 TXTPTR         EQU   $06        ; POINTER FOR TEXT OUTPUT
@@ -74,6 +78,12 @@ YDRAWO         EQU   $306       ; OLD POSITION Y
 XDRAW2         EQU   $308       ; UNDRAW CURSOR X
 YDRAW2         EQU   $30A       ; UNDRAW CURSOR Y
 ASCR           EQU   $30B       ; ACTIVE SCREEN TO DRAW
+BENCHM         EQU   $30D       ; BENCHMARK ON?
+*
+PSLO           EQU   $D8        ; USING FAC-ADRESS RANGE
+PSHI           EQU   $DA
+PDLO           EQU   $DC        ; USING ARG-ADRESS RANGE
+PDHI           EQU   $DE
 *
 ENTRY          JSR   SETUP      ; SETUP GRAPHIC
 *
@@ -88,7 +98,7 @@ INILOOP        LDA   #$00       ; INIT LOOP
 *
 LOOP           INC   JOYCNT     ; MAIN LOOP STARTS HERE
                LDA   JOYCNT
-               CMP   #$03
+               CMP   #$02
                BCC   READ1      ; LESS THAN 3 CYCLES
                LDA   #$00       ; READ PADDLE EVERY 3 CYCLES
                STA   JOYCNT
@@ -107,7 +117,7 @@ DECSPDY        LDA   ROTSPDY    ; DECREASE ANGLE
                DEC   ROTSPDY
                JMP   PREAD1     ; JUMP TO NEXT COMMAND
 INCSPDY        LDA   ROTSPDY    ; DECREASE WAIT COUNTER
-               CMP   #$15
+               CMP   #$20
                BCS   PREAD1     ; MAXIMUM 10
                INC   ROTSPDY
 *
@@ -125,7 +135,7 @@ DECSPDX        LDA   ROTSPDX    ; DECREASE ANGLE
                DEC   ROTSPDX
                JMP   PREAD2     ; JUMP TO NEXT COMMAND
 INCSPDX        LDA   ROTSPDX    ; DECREASE WAIT COUNTER
-               CMP   #$15
+               CMP   #$20
                BCS   PREAD2     ; MAXIMUM 10
                INC   ROTSPDX
 *
@@ -138,22 +148,34 @@ PREAD2         LDX   #$02       ; VARY X-ROT SPEED
                BCS   INCZTRS    ; INCREASE SPEED
                BCC   READ1      ; 256-STEP CIRCLE LOOP
 *
-INCZTRS        LDA   ZTRANS     ; DECREASE ZTRANS
-               CMP   #$40
+INCZTRS        LDA   ZTRANS     ; DECREASE DISTANCE
+               CMP   #$43
                BCC   READ1      ; LOOPCNT STILL POSITIVE
                DEC   ZTRANS
                JMP   READ1      ; JUMP TO NEXT COMMAND
-DECZTRS        LDA   ZTRANS     ; DECREASE WAIT COUNTER
-               CMP   #$57
-               BCS   READ1      ; MAXIMUM 10
+DECZTRS        LDA   ZTRANS     ; INCREASE DISTANCE
+               CMP   #$7F
+               BCS   READ1      ; MAIXMUM 127
                INC   ZTRANS
 *
 READ1          CLC              ; CALC NEXT STEP
+               LDX   #$00
                LDA   LOOPCNTY
-               ADC   ROTSPDY    ; ADD NEXT STEP
-               ADC   #$F6       ; ACCU = ACCU - 10
+               BPL   READ02
+               INX              ; INIT FOR BENCHMARK
+READ02         ADC   ROTSPDY    ; ADD NEXT STEP
+               ADC   #$F6       ; ACCU = ACCU -10
                STA   LOOPCNTY
-               CLC
+               LDA   LOOPCNTY
+               BPL   READ01     ;
+               INX
+READ01         CPX   #01
+               BNE   READ03     ; BENCHMARK LOOP START
+               LDY   BENCHM
+               BEQ   READ03     ; BENCHMARK OFF
+               JSR   BELL       ; REING BELL
+
+READ03         CLC
                LDA   LOOPCNTX
                ADC   ROTSPDX    ; ADD NEXT STEP
                ADC   #$F6       ; ACCU = ACCU - 10
@@ -184,7 +206,7 @@ KEY4           CMP   #$B4       ; KEY '4' IS PRESSED
                JSR   LOAD4
                JMP   ENDKEY
 KEY5           CMP   #$B5       ; KEY '5' IS PRESSED
-               BNE   KEYPLUS
+               BNE   KEYPLUS    ; NO VALID KEY IS PRESSED
                JSR   LOAD5
                JMP   ENDKEY
 KEYPLUS        CMP   #$AB       ; KEY '+' IS PRESSED
@@ -192,13 +214,22 @@ KEYPLUS        CMP   #$AB       ; KEY '+' IS PRESSED
                LDA   STROBE
                JMP   INCZTRS    ; INCREASE ZOOM
 KEYMINUS       CMP   #$AD       ; KEY '-' IS PRESSED
-               BNE   NOKEY      ; NO VALID KEY WAS PRESSED
+               BNE   KEYB
                LDA   STROBE
                JMP   DECZTRS
-ENDKEY         LDA   STROBE     ; CLEAR STROBE
-               JSR   SETUP
+KEYB           CMP   #$C2       ; KEY 'B' IS PRESSED
+               BNE   NOKEY
+               LDA   BENCHM     ; TOGGLE BENCHMARK ON/OFF
+               BEQ   BENCHON
+               DEC   BENCHM     ; TOGGLE OFF
+               BEQ   ENDKEY1
+BENCHON        INC   BENCHM     ; TOGGLE ON
+               BNE   ENDKEY1
+
+ENDKEY         JSR   SETUP
                JSR   WLCMTXT    ; WRITE WELCOME MESSAGE ON SCREEN
                JSR   INITPNTS
+ENDKEY1        LDA   STROBE
 *
 NOKEY          JSR   DRWLNS     ; DRAW LINES
 *
@@ -226,11 +257,12 @@ END            LDA   #$00
                JSR   HOME       ; CLEAR SCREEN
                JMP   $03D0      ; DOS WARM START NO RTS HERE!
 *
-* SETUP GRAPHICS
+* SETUP GRAPHICS & DATA
 *
 SETUP          LDA   #$00
                STA   $C050      ; SWITCH ON GRAPHICS
                STA   $C057      ; SWITCH TO HIRES
+               STA   BENCHM     ; BENCHMARK OFF
                LDA   #32
                STA   $E6        ; DRAW ON 1
                STA   $C055      ; SHOW 2
@@ -251,7 +283,7 @@ SETUP          LDA   #$00
                LDA   #$01
                STA   ASCR       ; DRAW ON HIRES 1
                STA   JOYCNT     ; SET JOYSTICK REQUEST COUNTER
-               LDA   #$50       ; SCALING
+               LDA   #$90       ; SCALING
                STA   SCALING
                LDA   #$50
                STA   ZTRANS     ; MOVE OBJECT AWAY FROM CAMERA
@@ -259,6 +291,14 @@ SETUP          LDA   #$00
                STA   SHTABPTR
                LDA   #>SHTAB
                STA   SHTABPTR+1
+               LDA   #SSQLO/256 ; SETUP MULT-TAB
+               STA   PSLO+1
+               LDA   #SSQHI/256
+               STA   PSHI+1
+               LDA   #DSQLO/256
+               STA   PDLO+1
+               LDA   #DSQHI/256
+               STA   PDHI+1
                RTS
 *
 ********************************
@@ -266,10 +306,6 @@ SETUP          LDA   #$00
 ********************************
 *
 UDRWLNS        LDA   #$00
-* JSR HCLR
-* JSR DRAWBOX
-* JSR WLCMTXT
-* RTS
 *
                STA   PNTCNT
                LDX   #$00       ; DELETE OLD LINES
@@ -358,15 +394,12 @@ UDRW1          INY
                INX              ; INC X-REG TO NEXT POINT
                BNE   UDRWNXT    ; DRAW NEXT LINE
 *
-*
 UNXTPNT        INC   PNTCNT
                LDA   PNTCNT
                CMP   NUMPNT
                BCS   UDRWEND    ; ALL DONE
                JMP   UGETPNT2
 UDRWEND        RTS
-*
-
 *
 ********************************
 * DRAW LINES                   *
@@ -379,8 +412,6 @@ DRWLNS         LDA   #$00
                BEQ   DRWSCR1
                BNE   SETCLR
 DRWSCR1        LDA   #32
-* STA $E6 ; DRAW ON 1
-* STA $C055 ; SHOW 2
 SETCLR         LDX   #$03       ; HCOLOR = 3
                JSR   HCOLOR
 GETPNT2        LDA   PNTCNT
@@ -549,33 +580,69 @@ GETPNT         LDA   PNTCNT
                JSR   MULT
                STY   COSXCOSY
                LDA   CAX        ; COSXONE = COSX * $7F (= 1)
-               STA   MATOR
-               LDA   #$7F
-               STA   MKAND
-               JSR   MULT
+               BPL   CX1
+               TAY
+               DEY
+               TYA
+               EOR   #$FF       ; TWO'S COMPLEMENT
+               LSR
+               EOR   #$FF
+               TAY
+               INY
                STY   COSXONE
-               LDA   SAX        ; SINXONE = SINX * $7F (= 1)
-               STA   MATOR
-               LDA   #$7F
-               STA   MKAND
-               JSR   MULT
+               BEQ   SX1
+               BNE   SX1
+CX1            LSR              ; SHORT METHOD IMPLEMENTED HERE
+               STA   COSXONE    ; DOES NOT NEED THE SMULT!
+SX1            LDA   SAX        ; SINXONE = SINX * $7F (= 1)
+               BPL   SX10
+               TAY
+               DEY
+               TYA
+               EOR   #$FF
+               LSR
+               EOR   #$FF
+               TAY
+               INY
                STY   SINXONE
-               LDA   CAY        ; COSYONE = COSX * $7F (= 1)
-               STA   MATOR
-               LDA   #$7F
-               STA   MKAND
-               JSR   MULT
+               BEQ   CY1
+               BNE   CY1
+SX10           LSR
+               STA   SINXONE
+CY1            LDA   CAY        ; COSYONE = COSX * $7F (= 1)
+               BPL   CY10
+               TAY
+               DEY
+               TYA
+               EOR   #$FF
+               LSR
+               EOR   #$FF
+               TAY
+               INY
                STY   COSYONE
-               LDA   SAY        ; SINYONE = SINX * $7F (= 1)
-               STA   MATOR
-               LDA   #$7F
-               STA   MKAND
-               JSR   MULT
+               BEQ   SY1
+               BNE   SY1
+CY10           LSR
+               STA   COSYONE
+SY1            LDA   SAY        ; SINYONE = SINX * $7F (= 1)
+               BPL   SY10
+               TAY
+               DEY
+               TYA
+               EOR   #$FF
+               LSR
+               EOR   #$FF
+               TAY
+               INY
                STY   SINYONE
+               BEQ   STRTROT
+               BNE   STRTROT
+SY10           LSR
+               STA   SINYONE
 *
 * ROTATE AROUND X AND Y
 *
-               LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
+STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                STA   MATOR
                LDA   COSYONE
                STA   MKAND
@@ -597,8 +664,8 @@ GETPNT         LDA   PNTCNT
                ADC   PX2+1
                STA   RX+1       ; SAVE HI-BYTE AS XPOS
 *
-               LDA   ZPOS       ; RZ = Z * C(X)C(Y) + Y * S(X)
-               STA   MATOR      ;      - X * C(X)S(Y)
+               LDA   ZPOS       ; RZ = Z * C(X)C(Y) + Y * S(X) - X * C(X)S(Y)
+               STA   MATOR
                LDA   COSXCOSY
                STA   MKAND
                JSR   MULT
@@ -633,10 +700,11 @@ GETPNT         LDA   PNTCNT
                SBC   PX3+1
                CLC              ; ADD ZTRANS
                ADC   ZTRANS
+               LSR
                STA   RZ+1
 *
-               LDA   ZPOS       ; RY = X * S(X)S(Y) + Y * C(X)
-               STA   MATOR      ;    - Z * S(X)C(Y)
+               LDA   ZPOS       ; RY = X * S(X)S(Y) + Y * C(X) - Z * S(X)C(Y)
+               STA   MATOR
                LDA   SINXCOSY
                STA   MKAND
                JSR   MULT
@@ -670,8 +738,6 @@ GETPNT         LDA   PNTCNT
                LDA   RY+1
                SBC   PX1+1
                STA   RY+1       ; SAVE HI-BYTE AS ZPOS
-*
-
 *
 * PERFORM SCALING AND TRANSLATION
 *
@@ -710,7 +776,7 @@ GETPNT         LDA   PNTCNT
                LDA   #$00
                STA   XD+1
                LDA   QX
-               BMI   CALCYD     ; IF QX < 0 THEN NO CARRY-ADD
+               BMI   CALCYD     ; IF QX < 0 THEN DO NOT ADD CARRY!
                LDA   #$00
                ADC   #$00       ; ADD CARRY BIT
                STA   XD+1
@@ -829,7 +895,7 @@ DRAWBOX        LDX   #$03
 DIVI           STY   DEND       ;
                STA   DEND+1
                STX   DOR
-
+*
                LDX   #$00
 DECHK          LDA   DEND+1     ; DIVIDEND NEG?
                BPL   DORCHK
@@ -854,7 +920,7 @@ DORCHK         LDA   DOR        ; DIVISOR NEG?
 DIVIGO         LDA   DEND+1     ; TOO LARGE OR ZERO?
                CMP   DOR        ; CMP HI-BYTE WITH DOR!
                BCS   DIVERR     ; YES -> ERROR!
-               LDY   #$08       ; 8 LOOPS
+               LDY   #$06       ; 6 LOOPS -> 6-BIT ACCURACY
 DLOOP          ASL   DEND       ; DOUBLE SHIFT DIVIDEND
                ROL              ; DEND+1 STILL IN ACCU!
                BCS   DSUBTR     ; SUBTRACTION WHEN CARRY IS SET
@@ -881,7 +947,9 @@ DCONT          DEY
                STA   DEND
                LDA   DOR        ; DOR = REMAINDER
 DIVEND         LDY   DEND       ; DEND = QUOTIENT
-               RTS
+               BNE   DIVRTS
+               INY
+DIVRTS         RTS
 DIVERR         LDY   #$00       ; RETURN 0 AS RESULT
                RTS
 *
@@ -905,22 +973,23 @@ UMKCHK         LDA   MKAND      ; MKAND NEG?
                INY
                STY   MKAND
 UMTCHK         LDA   MATOR      ; MATOR NEG?
-UMULTGO        LDA   #$00
-               LDY   #$07       ; LOOP 8 TIMES
-               ASL   MATOR
-UMLOOP         ASL
-               ROL   MATOR
-               BCC   UMCONT
-               CLC
-               ADC   MKAND
-               BCC   UMCONT
-               INC   MATOR
-UMCONT         DEY
-               BNE   UMLOOP
+               LDY   MKAND      ;
+               STA   PSLO       ; Index into sum table by A
+               STA   PSHI
+               EOR   #$FF
+               STA   PDLO       ; Index into diff table by -A-1
+               STA   PDHI
+               LDA   (PSLO),Y   ; Get (a+y)^2/4 (lo byte)
+               SEC
+               SBC   (PDLO),Y   ; Subtract (-a+y)^2/4 (lo byte)
+               STA   MKAND       ; SAVE IT
+               LDA   (PSHI),Y   ; GET (A+Y)^2/4 (HI-BYTE)
+               SBC   (PDHI),Y   ; Subtract (-A+Y)^2/4 (HI-BYTE)
+               STA   MATOR
 *
 * STORE RESULTS
 *
-               STA   MKAND      ; MKAND = LO-BYTE
+               LDA   MKAND      ; MKAND = LO-BYTE
                DEX              ; NEG SIGN FOR RESULT?
                BNE   UMEND      ; NO SIGN IS POSITIVE -> END
                EOR   #$FF       ; TWO'S COMPLEMENT  OF ACCU
@@ -961,25 +1030,24 @@ MTCHK          LDA   MATOR      ; MATOR NEG?
                TAY              ; INC X-REG FOR NEG SIGN
                INY
                STY   MATOR
-MULTGO         LDA   #$00
-               LDY   #$06       ; LOOP 8 TIMES
-               ASL   MATOR
-               ROL   MATOR
-               BCC   MCONT0
-               LDA   MKAND
-MLOOP          ASL
-MCONT0         ROL   MATOR
-               BCC   MCONT
-               CLC
-               ADC   MKAND
-               BCC   MCONT
-               INC   MATOR
-MCONT          DEY
-               BNE   MLOOP
+MULTGO         LDA   MATOR
+               LDY   MKAND      ;
+               STA   PSLO       ; Index into sum table by A
+               STA   PSHI
+               EOR   #$FF
+               STA   PDLO       ; Index into diff table by -A-1
+               STA   PDHI
+               LDA   (PSLO),Y   ; Get (a+y)^2/4 (lo byte)
+               SEC
+               SBC   (PDLO),Y   ; Subtract (-a+y)^2/4 (lo byte)
+               STA   MKAND      ; SAVE IT
+               LDA   (PSHI),Y   ; GET (A+Y)^2/4 (HI-BYTE)
+               SBC   (PDHI),Y   ; Subtract (-A+Y)^2/4 (HI-BYTE)
+               STA   MATOR
 *
 * STORE RESULTS
 *
-               STA   MKAND      ; MKAND = LO-BYTE
+               LDA   MKAND      ; MKAND = LO-BYTE
                DEX              ; NEG SIGN FOR RESULT?
                BNE   MEND       ; NO SIGN IS POSITIVE -> END
                EOR   #$FF       ; TWO'S COMPLEMENT  OF ACCU
@@ -1029,14 +1097,14 @@ TXTLOOP        LDA   TXTDAT,X
                LDY   #$00       ; HIGH-BYTE = 0
                LDA   #09        ; Y-OFFSET FOR TEXT OUTPUT
                JSR   HPOSN      ; POSITION THE CURSOR
-
+*
                LDX   SHPDUMP    ; RETRIEVE SHAPE-NUMBER
                JSR   SHNUM      ; GET SHAPE ADRESS
                LDA   #32        ; DRAW ON SCREEN 1
                STA   $E6
                LDA   #$00       ; SET ROT = 0
                JSR   SHDRAW     ; DRAW SHAPE
-
+*
                LDX   SHXPOS     ; GET SHAPE X-POS
                LDY   #$00       ; HIGH-BYTE = 0
                LDA   #09        ; Y-OFFSET FOR TEXT OUTPUT
@@ -1047,11 +1115,11 @@ TXTLOOP        LDA   TXTDAT,X
                STA   $E6
                LDA   #$00       ; SET ROT = 0
                JSR   SHDRAW     ; DRAW SHAPE
-
+*
                LDX   XREGDUMP
                INX
                BNE   TXTLOOP
-
+*
 TLP2           LDX   #$00
 TXTLOOP2       LDA   TXTDAT2,X
                BEQ   SUDONE     ; STOP WHEN $00 IS READ
@@ -1068,14 +1136,14 @@ TXTLOOP2       LDA   TXTDAT2,X
                LDY   #$00       ; HIGH-BYTE = 0
                LDA   #188       ; Y-OFFSET FOR TEXT OUTPUT
                JSR   HPOSN      ; POSITION THE CURSOR
-
+*
                LDX   SHPDUMP    ; RETRIEVE SHAPE-NUMBER
                JSR   SHNUM      ; GET SHAPE ADRESS
                LDA   #32        ; DRAW ON SCREEN 1
                STA   $E6
                LDA   #$00       ; SET ROT = 0
                JSR   SHDRAW     ; DRAW SHAPE
-
+*
                LDX   SHXPOS     ; GET SHAPE X-POS
                LDY   #$00       ; HIGH-BYTE = 0
                LDA   #188       ; Y-OFFSET FOR TEXT OUTPUT
@@ -1086,7 +1154,6 @@ TXTLOOP2       LDA   TXTDAT2,X
                STA   $E6
                LDA   #$00       ; SET ROT = 0
                JSR   SHDRAW     ; DRAW SHAPE
-
                LDX   XREGDUMP
                INX
                BNE   TXTLOOP2
