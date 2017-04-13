@@ -3,7 +3,7 @@
 *                              *
 *      BY MARC GOLOMBECK       *
 *                              *
-*   VERSION 1.2 / 10.04.2017   *
+*   VERSION 1.3 / 13.04.2017   *
 *                              *
 * NEEDS THE FOLLOWING DATA     *
 * ALREADY LOADED INTO MEMORY:  *
@@ -16,11 +16,12 @@
 * CONTROLLED VIA JOYSTICK AND  *
 * KEYBOARD:                    *
 *                              *
-* PDL(0/1/2): ROTATION+ZOOM    *
-* PBN(0/1/2): RESET/STOP/EXIT  *
-* KEYS 1-5  : CHOOSE 3D-OBJECT *
-* KEYS +/-  : ALTERNATE ZOOM   *
-* KEY B     : TOGGLE BENCHMARK *
+* PDL(0/1): ROTATION+ZOOM      *
+* PBN(0/1): RESET+STOP/EXIT    *
+* KEYS 1-5: CHOOSE 3D-OBJECT   *
+* KEYS +/-: ALTERNATE ZOOM     *
+* KEY B   : TOGGLE BENCHMARK   *
+* KEY Q   : QUIT PROGRAM       *
 *                              *
 ********************************
 *
@@ -34,7 +35,6 @@ HPOSN          EQU   $F411      ; SET HIRES-CURSOR NO DRAW
 HPLOT          EQU   $F457      ; DRAW HIRES-PIXEL
 HLIN           EQU   $F53A      ; DRAW HIRES-LINE
 PREAD          EQU   $FB1E      ; READ PADDLES
-WAIT           EQU   $FCA8      ; WAIT-ROUTINE
 PB0            EQU   $C061      ; PUSH-BUTTON 0
 PB1            EQU   $C062      ; PUSH-BUTTON 1
 PB2            EQU   $C063      ; PUSH-BUTTON 2
@@ -51,25 +51,24 @@ COSTAB         EQU   $7040      ; BASE ADRESS OF COSINE TABLE
 NUMPNT         EQU   $7200      ; NUMBER OF POINTS TO DRAW
 TABLE          EQU   $7201      ; BASE ADRESS FOR POINT TABLE
 SHTAB          EQU   $7400      ; BASE ADRESS OF SHAPES-68
-SHTABPTR       EQU   $E8        ; POINTER TO SHAPE-TABLE
-SSQLO          EQU   $7A00      ; MULT TAB
-SSQHI          EQU   $7C00      ; MULT TAB
-DSQLO          EQU   $7E00      ; MULT TAB
-DSQHI          EQU   $8000      ; MULT TAB
+SSQLO          EQU   $7A00      ; MULT TAB PART 1
+SSQHI          EQU   $7C00      ; MULT TAB PART 2
+DSQLO          EQU   $7E00      ; MULT TAB PART 3
+DSQHI          EQU   $8000      ; MULT TAB PART 4
 *
-XTRANS         EQU   $8B        ; TRANSLATION TO SCREEN CENTER
-YTRANS         EQU   $5F
+XTRANS         EQU   $8B        ; X-TRANSLATION CENTER SCREEN
+YTRANS         EQU   $5F        ; Y-TRANSLATION
 ZTRANS         EQU   $FE        ; MOVE 3D OBJECT AWAY FROM CAMERA
 *
-RADIUS         EQU   $30F       ; CIRCLE RADIUS
 TXTPTR         EQU   $06        ; POINTER FOR TEXT OUTPUT
 PTR            EQU   $08        ; POINTER FOR DOS COMMAND
+PNTCNT         EQU   $09        ; WHICH POINT TO DRAW?
+SCALE          EQU   $E7        ; SHAPE SCALE
+SHTABPTR       EQU   $E8        ; POINTER TO SHAPE-TABLE
 LOOPCNTY       EQU   $FA        ; Y-ROT-COUNTER
 ROTSPDY        EQU   $FB        ; Y-ROTATIONAL SPEED
 LOOPCNTX       EQU   $FC        ; X-ROT-COUNTER
 ROTSPDX        EQU   $FD        ; X-ROTATIONAL SPEED
-PNTCNT         EQU   $09        ; WHICH POINT TO DRAW?
-JOYCNT         EQU   $30C       ; COUNTER FOR JOYSTICK REQUEST
 SCALING        EQU   $FF        ; SCALING
 XDRAW          EQU   $300       ; X-POSITION FOR DRAW
 YDRAW          EQU   $302       ; Y-POSITION FOR DRAW
@@ -78,16 +77,18 @@ YDRAWO         EQU   $306       ; OLD POSITION Y
 XDRAW2         EQU   $308       ; UNDRAW CURSOR X
 YDRAW2         EQU   $30A       ; UNDRAW CURSOR Y
 ASCR           EQU   $30B       ; ACTIVE SCREEN TO DRAW
+JOYCNT         EQU   $30C       ; COUNTER FOR JOYSTICK REQUEST
 BENCHM         EQU   $30D       ; BENCHMARK ON?
+MAXDRAW        EQU   $30E       ; MAXIMUM LINES TO DRAW
 *
 PSLO           EQU   $D8        ; USING FAC-ADRESS RANGE
-PSHI           EQU   $DA
+PSHI           EQU   $DA        ; FOR POINTER IN MULT-TAB
 PDLO           EQU   $DC        ; USING ARG-ADRESS RANGE
-PDHI           EQU   $DE
+PDHI           EQU   $DE        ; FOR POINTER IN MULT-TAB
 *
-ENTRY          JSR   SETUP      ; SETUP GRAPHIC
+ENTRY          JSR   SETUP      ; SETUP GRAPHIC & VARIABLES
 *
-TABLESET       JSR   WLCMTXT    ; SHOW WELCOME MESSAGE
+TABLESET       JSR   WLCMTXT    ; DRAW TOP & BOTTOM TEXT
 *
 INILOOP        LDA   #$00       ; INIT LOOP
                STA   LOOPCNTY   ; CURRENT Y-STEP
@@ -99,8 +100,8 @@ INILOOP        LDA   #$00       ; INIT LOOP
 LOOP           INC   JOYCNT     ; MAIN LOOP STARTS HERE
                LDA   JOYCNT
                CMP   #$02
-               BCC   READ1      ; LESS THAN 3 CYCLES
-               LDA   #$00       ; READ PADDLE EVERY 3 CYCLES
+               BCC   READ1      ; LESS THAN 2 CYCLES
+               LDA   #$00       ; READ PADDLE EVERY 2 CYCLES
                STA   JOYCNT
 *
 PREAD0         LDX   #$00       ; VARY Y-ROT SPEED
@@ -127,16 +128,16 @@ PREAD1         LDX   #$01       ; VARY X-ROT SPEED
                BCC   DECSPDX    ; DECREASE SPEED
                CPY   #$9B
                BCS   INCSPDX    ; INCREASE SPEED
-               BCC   PREAD2     ; 256-STEP CIRCLE LOOP
+               BCC   READ1      ; 256-STEP CIRCLE LOOP
 *
 DECSPDX        LDA   ROTSPDX    ; DECREASE ANGLE
                CMP   #$01
-               BCC   PREAD2     ; LOOPCNT STILL POSITIVE
+               BCC   READ1      ; LOOPCNT STILL POSITIVE
                DEC   ROTSPDX
-               JMP   PREAD2     ; JUMP TO NEXT COMMAND
+               JMP   READ1      ; JUMP TO NEXT COMMAND
 INCSPDX        LDA   ROTSPDX    ; DECREASE WAIT COUNTER
                CMP   #$20
-               BCS   PREAD2     ; MAXIMUM 10
+               BCS   READ1      ; MAXIMUM 10
                INC   ROTSPDX
 *
 *
@@ -174,7 +175,7 @@ READ01         CPX   #01
                LDY   BENCHM
                BEQ   READ03     ; BENCHMARK OFF
                JSR   BELL       ; REING BELL
-
+*
 READ03         CLC
                LDA   LOOPCNTX
                ADC   ROTSPDX    ; ADD NEXT STEP
@@ -187,16 +188,15 @@ READ03         CLC
 * READ KEYBOARD FOR LOADING NEW OBJECTS
 *
                LDA   KYBD
-               CMP   #$80
-               BCC   NOKEY      ; NO KEY IS PRESSED
+               BPL   NOKEY      ; NO KEY IS PRESSED
 KEY1           CMP   #$B1       ; KEY '1' IS PRESSED
                BNE   KEY2
                JSR   LOAD1      ; LOAD OBJECT 1
-               JMP   ENDKEY     ; DONE
+               JMP   ENDKEY
 KEY2           CMP   #$B2       ; KEY '2' IS PRESSED
                BNE   KEY3
                JSR   LOAD2
-               JMP   ENDKEY     ; DONE
+               JMP   ENDKEY
 KEY3           CMP   #$B3       ; KEY '3' IS PRESSED
                BNE   KEY4
                JSR   LOAD3
@@ -206,7 +206,7 @@ KEY4           CMP   #$B4       ; KEY '4' IS PRESSED
                JSR   LOAD4
                JMP   ENDKEY
 KEY5           CMP   #$B5       ; KEY '5' IS PRESSED
-               BNE   KEYPLUS    ; NO VALID KEY IS PRESSED
+               BNE   KEYPLUS
                JSR   LOAD5
                JMP   ENDKEY
 KEYPLUS        CMP   #$AB       ; KEY '+' IS PRESSED
@@ -214,9 +214,13 @@ KEYPLUS        CMP   #$AB       ; KEY '+' IS PRESSED
                LDA   STROBE
                JMP   INCZTRS    ; INCREASE ZOOM
 KEYMINUS       CMP   #$AD       ; KEY '-' IS PRESSED
+               BNE   KEYQ
+               LDA   STROBE
+               JMP   DECZTRS    ; DECREASE ZOOM
+KEYQ           CMP   #$D1       ; KEY 'Q' IS PRESSED
                BNE   KEYB
                LDA   STROBE
-               JMP   DECZTRS
+               JMP   END        ; END PROGRAM
 KEYB           CMP   #$C2       ; KEY 'B' IS PRESSED
                BNE   NOKEY
                LDA   BENCHM     ; TOGGLE BENCHMARK ON/OFF
@@ -227,9 +231,9 @@ BENCHON        INC   BENCHM     ; TOGGLE ON
                BNE   ENDKEY1
 
 ENDKEY         JSR   SETUP
-               JSR   WLCMTXT    ; WRITE WELCOME MESSAGE ON SCREEN
-               JSR   INITPNTS
-ENDKEY1        LDA   STROBE
+               JSR   WLCMTXT    ; WRITE TOP & BOTTOM TEXT
+               JSR   INITPNTS   ; SET INITIAL POINT POSITION
+ENDKEY1        LDA   STROBE     ; CLEAR KEYPRESS
 *
 NOKEY          JSR   DRWLNS     ; DRAW LINES
 *
@@ -237,60 +241,92 @@ NOKEY          JSR   DRWLNS     ; DRAW LINES
 *
                LDA   PB1        ; PUSHBUTTON 1 PRESSED?
                BMI   END        ; EXIT PROGRAM!
-               LDA   PB2        ; PUSHBUTTON 2 PRESSED?
-               BPL   PB0CHK     ; NO -> CHECK PB0
-               LDA   #$0A       ; STOP ROTATION IMMEDIATELY
-               STA   ROTSPDY    ; RESET Y-ROT SPEED = 0
-               STA   ROTSPDX    ; RESET X-ROT SPEED = 0
 PB0CHK         LDA   PB0        ; PUSHBUTTON 0 PRESSED?
                BPL   GOLOOP     ; NO -> DO NEXT LOOP
-               LDA   #$00       ; RESET ASPECT
+               LDA   #$00       ; RESET ASPECT AND STOP ROTATION
                STA   LOOPCNTX   ; BACK TO INIT POS
                STA   LOOPCNTY
+               LDA   #$0A
+               STA   ROTSPDY    ; STOP ROTATION
+               STA   ROTSPDX
 *
 GOLOOP         JMP   LOOP       ; START AGAIN
 *
-END            LDA   #$00
+END            LDA   #$00       ; END PROGRAM
                STA   $C051      ; SWITCH TO TEXT
                STA   $C052
                STA   $C054
                JSR   HOME       ; CLEAR SCREEN
                JMP   $03D0      ; DOS WARM START NO RTS HERE!
 *
-* SETUP GRAPHICS & DATA
+********************************
+* SETUP GRAPHICS & DATA        *
+********************************
 *
 SETUP          LDA   #$00
                STA   $C050      ; SWITCH ON GRAPHICS
                STA   $C057      ; SWITCH TO HIRES
                STA   BENCHM     ; BENCHMARK OFF
+*
+               LDA   #<SHTAB    ; SET ADRESS FOR SHAPE-TABLE
+               STA   SHTABPTR
+               LDA   #>SHTAB
+               STA   SHTABPTR+1
+               LDA   #$01
+               STA   SCALE      ; SCALE = 1
+*
                LDA   #32
                STA   $E6        ; DRAW ON 1
                STA   $C055      ; SHOW 2
                JSR   HCLR       ; CLEAR HGR
                JSR   DRAWBOX    ; DRAW BOX ON HIRES 1
+               LDX   #14
+               LDY   #01        ; XPOS = 270
+               LDA   #6
+               JSR   HPOSN
+               LDX   #67
+               JSR   SHNUM
+               LDA   #00
+               JSR   SHDRAW
+*
                LDA   #64
                STA   $E6        ; DRAW ON 2
                STA   $C054
                JSR   HCLR       ; CLEAR HGR2
                JSR   DRAWBOX    ; DRAW BOX ON HIRES 2
+               LDX   #14
+               LDY   #01        ; XPOS = 270
+               LDA   #6
+               JSR   HPOSN
+               LDX   #67
+               JSR   SHNUM
+               LDA   #00
+               JSR   SHDRAW
+               LDX   #11
+               LDY   #01        ; XPOS = 267
+               LDA   #09
+               JSR   HPOSN
+               LDX   #69
+               JSR   SHNUM
+               LDA   #00
+               JSR   SHDRAW
+*
                LDA   #$03       ; INIT HCOLOR = 3
                JSR   HCOLOR
-               LDA   #$0A       ; INITIAL RADIUS
-               STA   RADIUS
+               LDA   #$0A
                STA   ROTSPDX    ; INITIAL X-ROT SPEED = 0
                LDA   #$0F
                STA   ROTSPDY    ; INITIAL Y-ROT SPEED = 1
+*
                LDA   #$01
                STA   ASCR       ; DRAW ON HIRES 1
                STA   JOYCNT     ; SET JOYSTICK REQUEST COUNTER
+*
                LDA   #$90       ; SCALING
                STA   SCALING
                LDA   #$50
                STA   ZTRANS     ; MOVE OBJECT AWAY FROM CAMERA
-               LDA   #<SHTAB    ; SET ADRESS FOR SHAPE-TABLE
-               STA   SHTABPTR
-               LDA   #>SHTAB
-               STA   SHTABPTR+1
+*
                LDA   #SSQLO/256 ; SETUP MULT-TAB
                STA   PSLO+1
                LDA   #SSQHI/256
@@ -299,107 +335,11 @@ SETUP          LDA   #$00
                STA   PDLO+1
                LDA   #DSQHI/256
                STA   PDHI+1
-               RTS
 *
-********************************
-* UNDRAW LINES                 *
-********************************
-*
-UDRWLNS        LDA   #$00
-*
-               STA   PNTCNT
-               LDX   #$00       ; DELETE OLD LINES
-               JSR   HCOLOR
-UGETPNT2       LDA   PNTCNT
-               ASL
-               ASL
-               ASL
-               ASL              ; X = CNTR*16
-               TAX
-               LDA   $E6        ; WHICH SCREEN?
-               CMP   #$20       ; SCREEN 1?
-               BEQ   UDRW2      ; YES -> SKIP 6 BYTES
-               INX              ; SKIP 9 BYTES -> SCREEN 2
-               INX
-               INX
-UDRW2          INX
-               INX
-               INX
-               INX
-               INX
-               INX
-               LDA   TABLE,X    ; GET OLD XPOS LO-BYTE
-               STA   XDRAW
-               INX
-               LDA   TABLE,X    ; GET OLD XPOS HI-BYTE
-               STA   XDRAW+1
-               INX
-               LDA   TABLE,X    ; GET OLD YPOS
-               STA   YDRAW
-               INX
-               LDA   $E6        ; WHICH SCREEN?
-               CMP   #$40       ; SCREEN 2?
-               BEQ   EVLPNTS2   ; YES -> EVAL POINTS NOW
-               INX              ; NO -> SKIP 3 BYTES
-               INX
-               INX
-*
-* EVALUATE POINTS TO DRAW TO
-*
-EVLPNTS2       LDA   #$04
+               LDA   #$04
                STA   MAXDRAW    ; NUMBER OF LINES TO DRAW
-UDRWNXT        LDA   TABLE,X
-               BEQ   UNXTPNT    ; NOTHING MORE TO DRAW
-               TAY              ; SUBTRACT 1 TO GET CORREC
-               DEY              ; POINT NUMBER
-               TYA
-               ASL              ; CALC BASE ADRESS OF POINT TO
-               ASL              ; DRAW TO
-               ASL
-               ASL
-               TAY              ; Y = POINNUMBER * 16
-               LDA   $E6        ; WHICH SCREEN?
-               CMP   #$20       ; SCREEN 1?
-               BEQ   UDRW1      ; YES -> SKIP 6 BYTES
-               INY              ; SKIP 9 BYTES FOR SCREEN 2
-               INY
-               INY
-UDRW1          INY
-               INY
-               INY
-               INY
-               INY
-               INY
-               LDA   TABLE,Y    ; READ OUT POINTS TO DRAW TO
-               STA   XTO
-               INY
-               LDA   TABLE,Y
-               STA   XTO+1
-               INY
-               LDA   TABLE,Y
-               STA   YTO
 *
-               STX   XREGSAVE   ; SAVE X-REG ON STACK
-               LDX   XDRAW
-               LDY   XDRAW+1
-               LDA   YDRAW
-               JSR   HPOSN      ; POSITION CURSOR
-               LDA   XTO
-               LDX   XTO+1
-               LDY   YTO
-               JSR   HLIN       ; DRAW LINE
-               LDX   XREGSAVE    ; RESTORE X-REG
-               DEC   MAXDRAW    ; MAXIMUM NUMBER OF LINES
-               BEQ   UNXTPNT    ; REACHED? IF YES NEXT POINT
-               INX              ; INC X-REG TO NEXT POINT
-               BNE   UDRWNXT    ; DRAW NEXT LINE
-*
-UNXTPNT        INC   PNTCNT
-               LDA   PNTCNT
-               CMP   NUMPNT
-               BCS   UDRWEND    ; ALL DONE
-               JMP   UGETPNT2
-UDRWEND        RTS
+               RTS
 *
 ********************************
 * DRAW LINES                   *
@@ -432,32 +372,15 @@ GETPNT2        LDA   PNTCNT
                LDA   TABLE,X    ; GET YPOS
                STA   YDRAW
                INX
-               LDA   $E6        ; WHICH SCREEN?
-               CMP   #$20       ; SCREEN 1?
-               BEQ   SVOLD      ; YES -> WRITE TO OLDPOS1
-               INX              ; NO -> SKIP 3 BYTES
-               INX              ; WRITE TO OLDPOS2
+               INX              ; SKIP 6 BYTES
                INX
-SVOLD          LDA   XDRAW      ; SAVE AS OLD-POS
-               STA   TABLE,X
                INX
-               LDA   XDRAW+1
-               STA   TABLE,X
                INX
-               LDA   YDRAW
-               STA   TABLE,X
-               INX
-               LDA   $E6        ; WHICH SCREEN?
-               CMP   #$40       ; SCREEN 2?
-               BEQ   EVLPNTS    ; YES -> EVAL POINTS NOW
-               INX              ; NO -> SKIP 3 BYTES
                INX
                INX
 *
 * EVALUATE POINTS TO DRAW TO
 *
-EVLPNTS        LDA   #$04
-               STA   MAXDRAW    ; NUMBER OF LINES TO DRAW
 DRWNXT         LDA   TABLE,X
                BEQ   NXTPNT     ; NOTHING MORE TO DRAW
                TAY              ; SUBTRACT 1 TO GET CORREC
@@ -489,7 +412,7 @@ DRWNXT         LDA   TABLE,X
                LDX   XTO+1
                LDY   YTO
                JSR   HLIN       ; DRAW LINE
-               LDX   XREGSAVE    ; RESTORE X-REG
+               LDX   XREGSAVE   ; RESTORE X-REG
                DEC   MAXDRAW    ; MAXIMUM NUMBER OF LINES
                BEQ   NXTPNT     ; REACHED? IF YES NEXT POINT
                INX              ; INC X-REG TO NEXT POINT
@@ -516,7 +439,6 @@ DRWEND2        RTS
 *
 XTO            DS    2          ; DRAW TO X-POS
 YTO            DS    1          ; DRAW TO Y-POS
-MAXDRAW        DS    1          ; MAXIMUM LINES TO DRAW
 XREGSAVE       DS    1          ; TEMPORARY SAVE FOR X-REG
 *
 *
@@ -528,20 +450,6 @@ XREGSAVE       DS    1          ; TEMPORARY SAVE FOR X-REG
 *
 INITPNTS       LDA   #$00
                STA   PNTCNT
-GETPNT         LDA   PNTCNT
-               ASL
-               ASL
-               ASL
-               ASL              ; X = CNTR*16
-               TAX
-               LDA   TABLE,X    ; GET XPOS
-               STA   XPOS
-               INX
-               LDA   TABLE,X    ; GET YPOS
-               STA   YPOS
-               INX
-               LDA   TABLE,X    ; GET ZPOS
-               STA   ZPOS
 *
 * EVAL SIN/COS-TAB
 *
@@ -635,12 +543,28 @@ SY1            LDA   SAY        ; SINYONE = SINX * $7F (= 1)
                TAY
                INY
                STY   SINYONE
-               BEQ   STRTROT
-               BNE   STRTROT
+               BEQ   GETPNT
+               BNE   GETPNT
 SY10           LSR
                STA   SINYONE
 *
-* ROTATE AROUND X AND Y
+*
+* ROTATE POINTS AROUND X AND Y
+*
+GETPNT         LDA   PNTCNT
+               ASL
+               ASL
+               ASL
+               ASL              ; X = CNTR*16
+               TAX
+               LDA   TABLE,X    ; GET XPOS
+               STA   XPOS
+               INX
+               LDA   TABLE,X    ; GET YPOS
+               STA   YPOS
+               INX
+               LDA   TABLE,X    ; GET ZPOS
+               STA   ZPOS
 *
 STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                STA   MATOR
@@ -824,11 +748,7 @@ CAX            DS    1
 SAY            DS    1
 CAY            DS    1
 PX1            DS    2          ; INTERMEDIATE RESULTS
-PY1            DS    2
-PZ1            DS    2
 PX2            DS    2
-PY2            DS    2
-PZ2            DS    2
 PX3            DS    2
 RX             DS    2
 RY             DS    2
@@ -887,7 +807,7 @@ DRAWBOX        LDX   #$03
                RTS
 *
 ********************************
-*SIGNED  DIVISION 16 BIT/8 BIT *
+*SIGNED  DIVISION 14 BIT/6 BIT *
 ********************************
 *
                CYC
@@ -974,17 +894,17 @@ UMKCHK         LDA   MKAND      ; MKAND NEG?
                STY   MKAND
 UMTCHK         LDA   MATOR      ; MATOR NEG?
                LDY   MKAND      ;
-               STA   PSLO       ; Index into sum table by A
+               STA   PSLO       ; INDEX INTO SUM TABLE BY A
                STA   PSHI
                EOR   #$FF
-               STA   PDLO       ; Index into diff table by -A-1
+               STA   PDLO       ; INDEX INTO DIFF TABLE BY -A-1
                STA   PDHI
-               LDA   (PSLO),Y   ; Get (a+y)^2/4 (lo byte)
+               LDA   (PSLO),Y   ; GET (A+Y)^2/4 (LO BYTE)
                SEC
-               SBC   (PDLO),Y   ; Subtract (-a+y)^2/4 (lo byte)
-               STA   MKAND       ; SAVE IT
+               SBC   (PDLO),Y   ; SUBTRACT (-A+Y)^2/4 (LO BYTE)
+               STA   MKAND      ; SAVE IT
                LDA   (PSHI),Y   ; GET (A+Y)^2/4 (HI-BYTE)
-               SBC   (PDHI),Y   ; Subtract (-A+Y)^2/4 (HI-BYTE)
+               SBC   (PDHI),Y   ; SUBTRACT (-A+Y)^2/4 (HI-BYTE)
                STA   MATOR
 *
 * STORE RESULTS
@@ -1032,17 +952,17 @@ MTCHK          LDA   MATOR      ; MATOR NEG?
                STY   MATOR
 MULTGO         LDA   MATOR
                LDY   MKAND      ;
-               STA   PSLO       ; Index into sum table by A
+               STA   PSLO       ; INDEX INTO SUM TABLE BY A
                STA   PSHI
                EOR   #$FF
-               STA   PDLO       ; Index into diff table by -A-1
+               STA   PDLO       ; INDEX INTO DIFF TABLE BY -A-1
                STA   PDHI
-               LDA   (PSLO),Y   ; Get (a+y)^2/4 (lo byte)
+               LDA   (PSLO),Y   ; GET (A+Y)^2/4 (LO BYTE)
                SEC
-               SBC   (PDLO),Y   ; Subtract (-a+y)^2/4 (lo byte)
+               SBC   (PDLO),Y   ; SUBTRACT (-A+Y)^2/4 (LO BYTE)
                STA   MKAND      ; SAVE IT
                LDA   (PSHI),Y   ; GET (A+Y)^2/4 (HI-BYTE)
-               SBC   (PDHI),Y   ; Subtract (-A+Y)^2/4 (HI-BYTE)
+               SBC   (PDHI),Y   ; SUBTRACT (-A+Y)^2/4 (HI-BYTE)
                STA   MATOR
 *
 * STORE RESULTS
@@ -1071,7 +991,7 @@ MATOR          DS    1
 MSIGN          DS    1
 *
 ********************************
-* WELCOME MESSAGE              *
+* TOP & BOTTOM TEXT MESSAGE    *
 ********************************
 *
 * PRINT OUT WELCOME TEXT AS SHAPES ON SCREEN
@@ -1080,7 +1000,7 @@ WLCMTXT        LDX   #$03
                JSR   HCOLOR
                STX   $F9        ; SET ROT = 0
                LDA   #$01
-               STA   $E7        ; SET SCALE = 1
+               STA   SCALE      ; SET SCALE = 1
                LDX   #$00
 TXTLOOP        LDA   TXTDAT,X
                BEQ   TLP2       ; STOP WHEN $00 IS READ
@@ -1215,14 +1135,14 @@ TXTLOOP3       LDA   (TXTPTR),Y
                LDY   #$00       ; HIGH-BYTE = 0
                LDA   #188       ; Y-OFFSET FOR TEXT OUTPUT
                JSR   HPOSN      ; POSITION THE CURSOR
-
+*
                LDX   SHPDUMP    ; RETRIEVE SHAPE-NUMBER
                JSR   SHNUM      ; GET SHAPE ADRESS
                LDA   #32        ; DRAW ON SCREEN 1
                STA   $E6
                LDA   #$00       ; SET ROT = 0
                JSR   SHDRAW     ; DRAW SHAPE
-
+*
                LDX   SHXPOS     ; GET SHAPE X-POS
                LDY   #$00       ; HIGH-BYTE = 0
                LDA   #188       ; Y-OFFSET FOR TEXT OUTPUT
@@ -1233,7 +1153,7 @@ TXTLOOP3       LDA   (TXTPTR),Y
                STA   $E6
                LDA   #$00       ; SET ROT = 0
                JSR   SHDRAW     ; DRAW SHAPE
-
+*
                LDY   YREGDUMP
                INY
                BNE   TXTLOOP3
@@ -1386,6 +1306,318 @@ PFIN           CLC
                LDA   PTR
                PHA
 PEXIT          RTS
+*
+********************************
+* UNDRAW LINES                 *
+********************************
+*
+UDRWLNS        LDA   #$00
+*
+               LDY   $E6
+               CPY   #$20
+               BEQ   UDRWSCR1
+               JMP   UDRWSCR2
+UDRWSCR1       LDX   #$0B
+UDRWLP1        STA   $2200,X
+               STA   $2600,X
+               STA   $2A00,X
+               STA   $2E00,X
+               STA   $3200,X
+               STA   $3600,X
+               STA   $3A00,X
+               STA   $3E00,X
+
+               STA   $2280,X
+               STA   $2680,X
+               STA   $2A80,X
+               STA   $2E80,X
+               STA   $3280,X
+               STA   $3680,X
+               STA   $3A80,X
+               STA   $3E80,X
+
+               STA   $2300,X
+               STA   $2700,X
+               STA   $2B00,X
+               STA   $2F00,X
+               STA   $3300,X
+               STA   $3700,X
+               STA   $3B00,X
+               STA   $3F00,X
+
+               STA   $2380,X
+               STA   $2780,X
+               STA   $2B80,X
+               STA   $2F80,X
+               STA   $3380,X
+               STA   $3780,X
+               STA   $3B80,X
+               STA   $3F80,X
+
+               STA   $2028,X
+               STA   $2428,X
+               STA   $2828,X
+               STA   $2C28,X
+               STA   $3028,X
+               STA   $3428,X
+               STA   $3828,X
+               STA   $3C28,X
+
+               STA   $20A8,X
+               STA   $24A8,X
+               STA   $28A8,X
+               STA   $2CA8,X
+               STA   $30A8,X
+               STA   $34A8,X
+               STA   $38A8,X
+               STA   $3CA8,X
+
+               STA   $2128,X
+               STA   $2528,X
+               STA   $2928,X
+               STA   $2D28,X
+               STA   $3128,X
+               STA   $3528,X
+               STA   $3928,X
+               STA   $3D28,X
+
+               STA   $21A8,X
+               STA   $25A8,X
+               STA   $29A8,X
+               STA   $2DA8,X
+               STA   $31A8,X
+               STA   $35A8,X
+               STA   $39A8,X
+               STA   $3DA8,X
+
+               STA   $2228,X
+               STA   $2628,X
+               STA   $2A28,X
+               STA   $2E28,X
+               STA   $3228,X
+               STA   $3628,X
+               STA   $3A28,X
+               STA   $3E28,X
+
+               STA   $22A8,X
+               STA   $26A8,X
+               STA   $2AA8,X
+               STA   $2EA8,X
+               STA   $32A8,X
+               STA   $36A8,X
+               STA   $3AA8,X
+               STA   $3EA8,X
+
+               STA   $2328,X
+               STA   $2728,X
+               STA   $2B28,X
+               STA   $2F28,X
+               STA   $3328,X
+               STA   $3728,X
+               STA   $3B28,X
+               STA   $3F28,X
+
+               STA   $23A8,X
+               STA   $27A8,X
+               STA   $2BA8,X
+               STA   $2FA8,X
+               STA   $33A8,X
+               STA   $37A8,X
+               STA   $3BA8,X
+               STA   $3FA8,X
+*
+               STA   $2050,X
+               STA   $2450,X
+               STA   $2850,X
+               STA   $2C50,X
+               STA   $3050,X
+               STA   $3450,X
+               STA   $3850,X
+               STA   $3C50,X
+
+               STA   $20D0,X
+               STA   $24D0,X
+               STA   $28D0,X
+               STA   $2CD0,X
+               STA   $30D0,X
+               STA   $34D0,X
+               STA   $38D0,X
+               STA   $3CD0,X
+
+               STA   $2150,X
+               STA   $2550,X
+               STA   $2950,X
+               STA   $2D50,X
+               STA   $3150,X
+               STA   $3550,X
+               STA   $3950,X
+               STA   $3D50,X
+
+               STA   $21D0,X
+               STA   $25D0,X
+               STA   $29D0,X
+               STA   $2DD0,X
+               STA   $31D0,X
+               STA   $35D0,X
+               STA   $39D0,X
+               STA   $3DD0,X
+
+               INX
+               CPX   #29
+               BEQ   UDRW1RTS
+               JMP   UDRWLP1
+UDRW1RTS       RTS
+
+UDRWSCR2       LDX   #$0B
+UDRWLP2        STA   $4200,X
+               STA   $4600,X
+               STA   $4A00,X
+               STA   $4E00,X
+               STA   $5200,X
+               STA   $5600,X
+               STA   $5A00,X
+               STA   $5E00,X
+
+               STA   $4280,X
+               STA   $4680,X
+               STA   $4A80,X
+               STA   $4E80,X
+               STA   $5280,X
+               STA   $5680,X
+               STA   $5A80,X
+               STA   $5E80,X
+
+               STA   $4300,X
+               STA   $4700,X
+               STA   $4B00,X
+               STA   $4F00,X
+               STA   $5300,X
+               STA   $5700,X
+               STA   $5B00,X
+               STA   $5F00,X
+
+               STA   $4380,X
+               STA   $4780,X
+               STA   $4B80,X
+               STA   $4F80,X
+               STA   $5380,X
+               STA   $5780,X
+               STA   $5B80,X
+               STA   $5F80,X
+
+               STA   $4028,X
+               STA   $4428,X
+               STA   $4828,X
+               STA   $4C28,X
+               STA   $5028,X
+               STA   $5428,X
+               STA   $5828,X
+               STA   $5C28,X
+
+               STA   $40A8,X
+               STA   $44A8,X
+               STA   $48A8,X
+               STA   $4CA8,X
+               STA   $50A8,X
+               STA   $54A8,X
+               STA   $58A8,X
+               STA   $5CA8,X
+*
+               STA   $4128,X
+               STA   $4528,X
+               STA   $4928,X
+               STA   $4D28,X
+               STA   $5128,X
+               STA   $5528,X
+               STA   $5928,X
+               STA   $5D28,X
+
+               STA   $41A8,X
+               STA   $45A8,X
+               STA   $49A8,X
+               STA   $4DA8,X
+               STA   $51A8,X
+               STA   $55A8,X
+               STA   $59A8,X
+               STA   $5DA8,X
+
+               STA   $4228,X
+               STA   $4628,X
+               STA   $4A28,X
+               STA   $4E28,X
+               STA   $5228,X
+               STA   $5628,X
+               STA   $5A28,X
+               STA   $5E28,X
+
+               STA   $42A8,X
+               STA   $46A8,X
+               STA   $4AA8,X
+               STA   $4EA8,X
+               STA   $52A8,X
+               STA   $56A8,X
+               STA   $5AA8,X
+               STA   $5EA8,X
+
+               STA   $4328,X
+               STA   $4728,X
+               STA   $4B28,X
+               STA   $4F28,X
+               STA   $5328,X
+               STA   $5728,X
+               STA   $5B28,X
+               STA   $5F28,X
+
+               STA   $43A8,X
+               STA   $47A8,X
+               STA   $4BA8,X
+               STA   $4FA8,X
+               STA   $53A8,X
+               STA   $57A8,X
+               STA   $5BA8,X
+               STA   $5FA8,X
+*
+               STA   $4050,X
+               STA   $4450,X
+               STA   $4850,X
+               STA   $4C50,X
+               STA   $5050,X
+               STA   $5450,X
+               STA   $5850,X
+               STA   $5C50,X
+
+               STA   $40D0,X
+               STA   $44D0,X
+               STA   $48D0,X
+               STA   $4CD0,X
+               STA   $50D0,X
+               STA   $54D0,X
+               STA   $58D0,X
+               STA   $5CD0,X
+
+               STA   $4150,X
+               STA   $4550,X
+               STA   $4950,X
+               STA   $4D50,X
+               STA   $5150,X
+               STA   $5550,X
+               STA   $5950,X
+               STA   $5D50,X
+
+               STA   $41D0,X
+               STA   $45D0,X
+               STA   $49D0,X
+               STA   $4DD0,X
+               STA   $51D0,X
+               STA   $55D0,X
+               STA   $59D0,X
+               STA   $5DD0,X
+
+               INX
+               CPX   #29
+               BEQ   UDRW2RTS
+               JMP   UDRWLP2
+UDRW2RTS       RTS
 *
                LST   OFF
 *
