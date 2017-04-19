@@ -3,7 +3,7 @@
 *                              *
 *      BY MARC GOLOMBECK       *
 *                              *
-*   VERSION 1.3 / 13.04.2017   *
+*   VERSION 1.31 / 19.04.2017  *
 *                              *
 * NEEDS THE FOLLOWING DATA     *
 * ALREADY LOADED INTO MEMORY:  *
@@ -144,20 +144,11 @@ INCSPDX        LDA   ROTSPDX    ; DECREASE WAIT COUNTER
 PREAD2         LDX   #$02       ; VARY X-ROT SPEED
                JSR   PREAD      ; PADDLE (1)
                CPY   #$64
-               BCC   DECZTRS    ; DECREASE SPEED
+* BCC DECZTRS ; DECREASE SPEED
                CPY   #$9B
-               BCS   INCZTRS    ; INCREASE SPEED
+* BCS INCZTRS ; INCREASE SPEED
                BCC   READ1      ; 256-STEP CIRCLE LOOP
 *
-INCZTRS        LDA   ZTRANS     ; DECREASE DISTANCE
-               CMP   #$43
-               BCC   READ1      ; LOOPCNT STILL POSITIVE
-               DEC   ZTRANS
-               JMP   READ1      ; JUMP TO NEXT COMMAND
-DECZTRS        LDA   ZTRANS     ; INCREASE DISTANCE
-               CMP   #$7F
-               BCS   READ1      ; MAIXMUM 127
-               INC   ZTRANS
 *
 READ1          CLC              ; CALC NEXT STEP
                LDX   #$00
@@ -188,7 +179,7 @@ READ03         CLC
 * READ KEYBOARD FOR LOADING NEW OBJECTS
 *
                LDA   KYBD
-               BPL   NOKEY      ; NO KEY IS PRESSED
+               BPL   NOKEY1     ; NO KEY IS PRESSED
 KEY1           CMP   #$B1       ; KEY '1' IS PRESSED
                BNE   KEY2
                JSR   LOAD1      ; LOAD OBJECT 1
@@ -209,14 +200,29 @@ KEY5           CMP   #$B5       ; KEY '5' IS PRESSED
                BNE   KEYPLUS
                JSR   LOAD5
                JMP   ENDKEY
+NOKEY1         BPL   NOKEY      ; INTERMEDIATE JUMP
 KEYPLUS        CMP   #$AB       ; KEY '+' IS PRESSED
                BNE   KEYMINUS
                LDA   STROBE
-               JMP   INCZTRS    ; INCREASE ZOOM
+               LDA   SCALING    ; INCREASE DISTANCE
+               CMP   #$B7       ; WAS $7F
+               BCS   ENDKEY1    ; MAIXMUM 127
+               INC   SCALING
+               INC   SCALING
+               INC   SCALING
+               INC   SCALING
+               BNE   ENDKEY1
 KEYMINUS       CMP   #$AD       ; KEY '-' IS PRESSED
                BNE   KEYQ
                LDA   STROBE
-               JMP   DECZTRS    ; DECREASE ZOOM
+               LDA   SCALING    ; DECREASE DISTANCE
+               CMP   #$0A       ; WAS $43
+               BCC   ENDKEY1    ; LOOPCNT STILL POSITIVE
+               DEC   SCALING
+               DEC   SCALING
+               DEC   SCALING
+               DEC   SCALING
+               BNE   ENDKEY1    ; JUMP TO NEXT COMMAND
 KEYQ           CMP   #$D1       ; KEY 'Q' IS PRESSED
                BNE   KEYB
                LDA   STROBE
@@ -625,6 +631,7 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                CLC              ; ADD ZTRANS
                ADC   ZTRANS
                LSR
+* LSR
                STA   RZ+1
 *
                LDA   ZPOS       ; RY = X * S(X)S(Y) + Y * C(X) - Z * S(X)C(Y)
@@ -673,7 +680,7 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                STA   SCX
                STY   SCX+1
 *
-               LDA   SCX+1      ; QX = SCX / RZ
+               LDA   SCX+1      ; QX = SCX * (1 / RZ)
                LDY   SCX
                LDX   RZ+1       ; ONLY HI-BYTE
                JSR   DIVI
@@ -765,6 +772,7 @@ COSXONE        DS    1
 SINXONE        DS    1
 COSYONE        DS    1
 SINYONE        DS    1
+DIVRES         DS    1
 *
 ********************************
 * DRAW BOX AROUND HIRES SCREEN *
@@ -839,21 +847,55 @@ DORCHK         LDA   DOR        ; DIVISOR NEG?
 *
 DIVIGO         LDA   DEND+1     ; TOO LARGE OR ZERO?
                CMP   DOR        ; CMP HI-BYTE WITH DOR!
-               BCS   DIVERR     ; YES -> ERROR!
-               LDY   #$06       ; 6 LOOPS -> 6-BIT ACCURACY
+               BCC   DLOOP      ; NO -> NO ERROR!
+               JMP   DIVERR     ; YES -> ERROR!
 DLOOP          ASL   DEND       ; DOUBLE SHIFT DIVIDEND
                ROL              ; DEND+1 STILL IN ACCU!
                BCS   DSUBTR     ; SUBTRACTION WHEN CARRY IS SET
                CMP   DOR
-               BCC   DCONT
+               BCC   DLOOP2
 DSUBTR         SBC   DOR
                INC   DEND
-DCONT          DEY
-               BNE   DLOOP
+DLOOP2         ASL   DEND       ; DOUBLE SHIFT DIVIDEND
+               ROL              ; DEND+1 STILL IN ACCU!
+               BCS   DSUBTR2    ; SUBTRACTION WHEN CARRY IS SET
+               CMP   DOR
+               BCC   DLOOP3
+DSUBTR2        SBC   DOR
+               INC   DEND
+DLOOP3         ASL   DEND       ; DOUBLE SHIFT DIVIDEND
+               ROL              ; DEND+1 STILL IN ACCU!
+               BCS   DSUBTR3    ; SUBTRACTION WHEN CARRY IS SET
+               CMP   DOR
+               BCC   DLOOP4
+DSUBTR3        SBC   DOR
+               INC   DEND
+DLOOP4         ASL   DEND       ; DOUBLE SHIFT DIVIDEND
+               ROL              ; DEND+1 STILL IN ACCU!
+               BCS   DSUBTR4    ; SUBTRACTION WHEN CARRY IS SET
+               CMP   DOR
+               BCC   DLOOP5
+DSUBTR4        SBC   DOR
+               INC   DEND
+DLOOP5         ASL   DEND       ; DOUBLE SHIFT DIVIDEND
+               ROL              ; DEND+1 STILL IN ACCU!
+               BCS   DSUBTR5    ; SUBTRACTION WHEN CARRY IS SET
+               CMP   DOR
+               BCC   DLOOP6
+DSUBTR5        SBC   DOR
+               INC   DEND
+DLOOP6         ASL   DEND       ; DOUBLE SHIFT DIVIDEND
+               ROL              ; DEND+1 STILL IN ACCU!
+               BCS   DSUBTR6    ; SUBTRACTION WHEN CARRY IS SET
+               CMP   DOR
+               BCC   DCONT
+DSUBTR6        SBC   DOR
+               INC   DEND
+
 *
 * STORE RESULTS
 *
-               STA   DOR        ; MOVE REMAINDER IN DOR
+DCONT          STA   DOR        ; MOVE REMAINDER IN DOR
                CLC              ; NO ERROR -> CLEAR CARRY
                CPX   #$01       ; NEG SIGN FOR RESULT?
                BNE   DIVEND     ; NO, SIGN IS POSITIVE -> END
@@ -1619,7 +1661,7 @@ UDRWLP2        STA   $4200,X
                JMP   UDRWLP2
 UDRW2RTS       RTS
 *
-               LST   OFF
+               LST  OFF
 *
                CHK
 *
