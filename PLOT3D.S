@@ -3,7 +3,7 @@
 *                              *
 *      BY MARC GOLOMBECK       *
 *                              *
-*   VERSION 1.31 / 19.04.2017  *
+*   VERSION 1.40 / 25.04.2017  *
 *                              *
 * NEEDS THE FOLLOWING DATA     *
 * ALREADY LOADED INTO MEMORY:  *
@@ -12,6 +12,7 @@
 * $7200: POINT AND LINE DATA   *
 * $7400: SHAPE TABLE           *
 * $7A00: MULTIPLICATION TABLE  *
+* $8200: PROJECTION TABLE      *
 *                              *
 * CONTROLLED VIA JOYSTICK AND  *
 * KEYBOARD:                    *
@@ -45,6 +46,7 @@ STROBE         EQU   $C010      ; CLEAR KEYBOARD
 SHNUM          EQU   $F730      ; GET ADRESS OF SHAPE NUMBER
 SHDRAW         EQU   $F605      ; DRAW SHAPE ON SCREEN
 BELL           EQU   $FBDD      ; RING BELL
+WAIT           EQU   $FCA8      ; WAIT A BIT
 *
 SINTAB         EQU   $7000      ; BASE ADRESS OF SINE TABLE
 COSTAB         EQU   $7040      ; BASE ADRESS OF COSINE TABLE
@@ -55,6 +57,7 @@ SSQLO          EQU   $7A00      ; MULT TAB PART 1
 SSQHI          EQU   $7C00      ; MULT TAB PART 2
 DSQLO          EQU   $7E00      ; MULT TAB PART 3
 DSQHI          EQU   $8000      ; MULT TAB PART 4
+PROJTAB        EQU   $8200      ; PROJECTION TAB
 *
 XTRANS         EQU   $8B        ; X-TRANSLATION CENTER SCREEN
 YTRANS         EQU   $5F        ; Y-TRANSLATION
@@ -80,6 +83,11 @@ ASCR           EQU   $30B       ; ACTIVE SCREEN TO DRAW
 JOYCNT         EQU   $30C       ; COUNTER FOR JOYSTICK REQUEST
 BENCHM         EQU   $30D       ; BENCHMARK ON?
 MAXDRAW        EQU   $30E       ; MAXIMUM LINES TO DRAW
+TEMP1          EQU   $EB        ; TEMP STORAGE
+TEMP2          EQU   $EC        ; TENP STORAGE
+MKAND          EQU   $ED        ; MULTIPLICANT
+MATOR          EQU   $EF        ; MULTIPLICATOR
+
 *
 PSLO           EQU   $D8        ; USING FAC-ADRESS RANGE
 PSHI           EQU   $DA        ; FOR POINTER IN MULT-TAB
@@ -99,7 +107,7 @@ INILOOP        LDA   #$00       ; INIT LOOP
 *
 LOOP           INC   JOYCNT     ; MAIN LOOP STARTS HERE
                LDA   JOYCNT
-               CMP   #$02
+               CMP   #$04
                BCC   READ1      ; LESS THAN 2 CYCLES
                LDA   #$00       ; READ PADDLE EVERY 2 CYCLES
                STA   JOYCNT
@@ -113,13 +121,15 @@ PREAD0         LDX   #$00       ; VARY Y-ROT SPEED
                BCC   PREAD1     ; 256-STEP CIRCLE LOOP
 *
 DECSPDY        LDA   ROTSPDY    ; DECREASE ANGLE
-               CMP   #$01
-               BCC   READ1      ; LOOPCNT STILL POSITIVE
+               CMP   #$02
+               BCC   PREAD1     ; LOOPCNT STILL POSITIVE
+               DEC   ROTSPDY
                DEC   ROTSPDY
                JMP   PREAD1     ; JUMP TO NEXT COMMAND
 INCSPDY        LDA   ROTSPDY    ; DECREASE WAIT COUNTER
                CMP   #$20
                BCS   PREAD1     ; MAXIMUM 10
+               INC   ROTSPDY
                INC   ROTSPDY
 *
 PREAD1         LDX   #$01       ; VARY X-ROT SPEED
@@ -131,24 +141,16 @@ PREAD1         LDX   #$01       ; VARY X-ROT SPEED
                BCC   READ1      ; 256-STEP CIRCLE LOOP
 *
 DECSPDX        LDA   ROTSPDX    ; DECREASE ANGLE
-               CMP   #$01
+               CMP   #$02
                BCC   READ1      ; LOOPCNT STILL POSITIVE
+               DEC   ROTSPDX
                DEC   ROTSPDX
                JMP   READ1      ; JUMP TO NEXT COMMAND
 INCSPDX        LDA   ROTSPDX    ; DECREASE WAIT COUNTER
                CMP   #$20
                BCS   READ1      ; MAXIMUM 10
                INC   ROTSPDX
-*
-*
-PREAD2         LDX   #$02       ; VARY X-ROT SPEED
-               JSR   PREAD      ; PADDLE (1)
-               CPY   #$64
-* BCC DECZTRS ; DECREASE SPEED
-               CPY   #$9B
-* BCS INCZTRS ; INCREASE SPEED
-               BCC   READ1      ; 256-STEP CIRCLE LOOP
-*
+               INC   ROTSPDX
 *
 READ1          CLC              ; CALC NEXT STEP
                LDX   #$00
@@ -174,7 +176,7 @@ READ03         CLC
                STA   LOOPCNTX
 *
                JSR   INITPNTS   ; CALC NEW POINT POSITIONS
-               JSR   UDRWLNS    ; UNDRAW LINES
+               JSR   UDRWLNS  ; UNDRAW LINES
 *
 * READ KEYBOARD FOR LOADING NEW OBJECTS
 *
@@ -204,24 +206,24 @@ NOKEY1         BPL   NOKEY      ; INTERMEDIATE JUMP
 KEYPLUS        CMP   #$AB       ; KEY '+' IS PRESSED
                BNE   KEYMINUS
                LDA   STROBE
-               LDA   SCALING    ; INCREASE DISTANCE
-               CMP   #$B7       ; WAS $7F
-               BCS   ENDKEY1    ; MAIXMUM 127
-               INC   SCALING
-               INC   SCALING
-               INC   SCALING
-               INC   SCALING
+               LDA   ZTRANS     ; INCREASE DISTANCE
+               CMP   #$30       ; WAS $7F
+               BCC   ENDKEY1    ; MAIXMUM 127
+               DEC   ZTRANS
+               DEC   ZTRANS
+               DEC   ZTRANS
+               DEC   ZTRANS
                BNE   ENDKEY1
 KEYMINUS       CMP   #$AD       ; KEY '-' IS PRESSED
                BNE   KEYQ
                LDA   STROBE
-               LDA   SCALING    ; DECREASE DISTANCE
-               CMP   #$0A       ; WAS $43
-               BCC   ENDKEY1    ; LOOPCNT STILL POSITIVE
-               DEC   SCALING
-               DEC   SCALING
-               DEC   SCALING
-               DEC   SCALING
+               LDA   ZTRANS     ; DECREASE DISTANCE
+               CMP   #$D0       ; WAS $43
+               BCS   ENDKEY1    ; LOOPCNT STILL POSITIVE
+               INC   ZTRANS
+               INC   ZTRANS
+               INC   ZTRANS
+               INC   ZTRANS
                BNE   ENDKEY1    ; JUMP TO NEXT COMMAND
 KEYQ           CMP   #$D1       ; KEY 'Q' IS PRESSED
                BNE   KEYB
@@ -328,7 +330,7 @@ SETUP          LDA   #$00
                STA   ASCR       ; DRAW ON HIRES 1
                STA   JOYCNT     ; SET JOYSTICK REQUEST COUNTER
 *
-               LDA   #$90       ; SCALING
+               LDA   #$30       ; SCALING
                STA   SCALING
                LDA   #$50
                STA   ZTRANS     ; MOVE OBJECT AWAY FROM CAMERA
@@ -413,11 +415,13 @@ DRWNXT         LDA   TABLE,X
                LDX   XDRAW
                LDY   XDRAW+1
                LDA   YDRAW
-               JSR   HPOSN      ; POSITION CURSOR
+               JSR   HPOSN  ; POSITION CURSOR
+* JSR  HPLOT ; POSITION CURSOR
                LDA   XTO
                LDX   XTO+1
                LDY   YTO
-               JSR   HLIN       ; DRAW LINE
+               JSR   HLIN  ; DRAW LINE
+* JSR WAIT
                LDX   XREGSAVE   ; RESTORE X-REG
                DEC   MAXDRAW    ; MAXIMUM NUMBER OF LINES
                BEQ   NXTPNT     ; REACHED? IF YES NEXT POINT
@@ -473,32 +477,33 @@ INITPNTS       LDA   #$00
                STA   MATOR
                LDA   SAY
                STA   MKAND
-               JSR   MULT
+               JSR   FMULT      ; FAST MULTIPLY
                STY   SINXSINY   ; ONLY HI-BYTE
-               LDA   SAX        ; SINXCOSY = SINX * COSY
-               STA   MATOR
+* LDA SAX ; SINXCOSY = SINX * COSY
+* STA MATOR
                LDA   CAY
                STA   MKAND
-               JSR   MULT
+               JSR   FMULT
                STY   SINXCOSY   ; ONLY HI-BYTE
                LDA   CAX        ; COSXSINY = COSX * SINY
                STA   MATOR
                LDA   SAY
                STA   MKAND
-               JSR   MULT
+               JSR   FMULT
                STY   COSXSINY
-               LDA   CAX        ; COSXCOSY = COSX * COSY
-               STA   MATOR
+* LDA CAX ; COSXCOSY = COSX * COSY
+* STA MATOR
                LDA   CAY
                STA   MKAND
-               JSR   MULT
+               JSR   FMULT
                STY   COSXCOSY
+
                LDA   CAX        ; COSXONE = COSX * $7F (= 1)
                BPL   CX1
                TAY
                DEY
                TYA
-               EOR   #$FF       ; TWO'S COMPLEMENT
+               EOR   #$FF ; TWO'S COMPLEMENT
                LSR
                EOR   #$FF
                TAY
@@ -508,7 +513,8 @@ INITPNTS       LDA   #$00
                BNE   SX1
 CX1            LSR              ; SHORT METHOD IMPLEMENTED HERE
                STA   COSXONE    ; DOES NOT NEED THE SMULT!
-SX1            LDA   SAX        ; SINXONE = SINX * $7F (= 1)
+
+SX1            LDA   SAX        ; #SINXONE = SINX * $7F (= 1)
                BPL   SX10
                TAY
                DEY
@@ -523,6 +529,7 @@ SX1            LDA   SAX        ; SINXONE = SINX * $7F (= 1)
                BNE   CY1
 SX10           LSR
                STA   SINXONE
+
 CY1            LDA   CAY        ; COSYONE = COSX * $7F (= 1)
                BPL   CY10
                TAY
@@ -538,6 +545,7 @@ CY1            LDA   CAY        ; COSYONE = COSX * $7F (= 1)
                BNE   SY1
 CY10           LSR
                STA   COSYONE
+
 SY1            LDA   SAY        ; SINYONE = SINX * $7F (= 1)
                BPL   SY10
                TAY
@@ -579,6 +587,7 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                JSR   MULT
                STA   PX1
                STY   PX1+1
+
                LDA   ZPOS
                STA   MATOR
                LDA   SINYONE
@@ -586,6 +595,7 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                JSR   MULT
                STA   PX2
                STY   PX2+1
+
                CLC              ; ADD
                LDA   PX1
                ADC   PX2
@@ -594,13 +604,14 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                ADC   PX2+1
                STA   RX+1       ; SAVE HI-BYTE AS XPOS
 *
-               LDA   ZPOS       ; RZ = Z * C(X)C(Y) + Y * S(X) - X * C(X)S(Y)
-               STA   MATOR
+* LDA ZPOS ; RZ = Z * C(X)C(Y) + Y * S(X) - X * C(X)S(Y)
+* STA MATOR STILL IN MATOR
                LDA   COSXCOSY
                STA   MKAND
                JSR   MULT
                STA   PX1
                STY   PX1+1
+
                LDA   YPOS
                STA   MATOR
                LDA   SINXONE
@@ -608,6 +619,7 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                JSR   MULT
                STA   PX2
                STY   PX2+1
+
                LDA   XPOS
                STA   MATOR
                LDA   COSXSINY
@@ -615,6 +627,7 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                JSR   MULT
                STA   PX3
                STY   PX3+1
+
                CLC              ; ADD
                LDA   PX1
                ADC   PX2
@@ -622,6 +635,7 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                LDA   PX1+1
                ADC   PX2+1
                STA   RZ+1
+
                SEC              ; SUB
                LDA   RZ
                SBC   PX3
@@ -631,9 +645,18 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                CLC              ; ADD ZTRANS
                ADC   ZTRANS
                LSR
-* LSR
+               LSR
                STA   RZ+1
 *
+* ; RY = X * S(X)S(Y) + Y * C(X) - Z * S(X)C(Y)
+* LDA XPOS STILL IN MATOR
+* STA MATOR
+               LDA   SINXSINY
+               STA   MKAND
+               JSR   MULT
+               STA   PX3
+               STY   PX3+1
+
                LDA   ZPOS       ; RY = X * S(X)S(Y) + Y * C(X) - Z * S(X)C(Y)
                STA   MATOR
                LDA   SINXCOSY
@@ -641,6 +664,7 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                JSR   MULT
                STA   PX1
                STY   PX1+1
+
                LDA   YPOS
                STA   MATOR
                LDA   COSXONE
@@ -648,13 +672,7 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                JSR   MULT
                STA   PX2
                STY   PX2+1
-               LDA   XPOS
-               STA   MATOR
-               LDA   SINXSINY
-               STA   MKAND
-               JSR   MULT
-               STA   PX3
-               STY   PX3+1
+
                CLC              ; ADD
                LDA   PX3
                ADC   PX2
@@ -662,6 +680,7 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
                LDA   PX3+1
                ADC   PX2+1
                STA   RY+1
+
                SEC              ; SUB
                LDA   RY
                SBC   PX1
@@ -672,33 +691,21 @@ STRTROT        LDA   XPOS       ; RX = X * COS(Y) + Z * SIN(Y)
 *
 * PERFORM SCALING AND TRANSLATION
 *
-               LDA   SCALING    ; SCX = SCALE * RX
+               LDX   RZ+1       ; LOAD PROJECTION
+               LDA   PROJTAB,X
                STA   MATOR
                LDA   RX+1       ; ONLY HI-BYTE!
+               ASL
                STA   MKAND
                JSR   UMULT
-               STA   SCX
-               STY   SCX+1
-*
-               LDA   SCX+1      ; QX = SCX * (1 / RZ)
-               LDY   SCX
-               LDX   RZ+1       ; ONLY HI-BYTE
-               JSR   DIVI
                STY   QX
 *
-               LDA   SCALING    ; SCY = SCALE * RY
-               STA   MATOR
+* LDA  PROJTAB,X STILL IN MATOR!
                LDA   RY+1       ; ONLY HI-BYTE!
+               ASL
                STA   MKAND
                JSR   UMULT
-               STA   SCY
-               STY   SCY+1
-*
-               LDA   SCY+1      ; QY = SCY / RZ
-               LDY   SCY
-               LDX   RZ+1       ; ONLY HI-BYTE
-               JSR   DIVI
-               STY   QY
+               STY  QY
 *
                CLC              ; XD = QX + XT
                LDA   QX
@@ -773,6 +780,7 @@ SINXONE        DS    1
 COSYONE        DS    1
 SINYONE        DS    1
 DIVRES         DS    1
+PROJCORR       DS    1
 *
 ********************************
 * DRAW BOX AROUND HIRES SCREEN *
@@ -815,7 +823,7 @@ DRAWBOX        LDX   #$03
                RTS
 *
 ********************************
-*SIGNED  DIVISION 14 BIT/6 BIT *
+*SIGNED  DIVISION 16 BIT/8 BIT *
 ********************************
 *
                CYC
@@ -888,8 +896,22 @@ DLOOP6         ASL   DEND       ; DOUBLE SHIFT DIVIDEND
                ROL              ; DEND+1 STILL IN ACCU!
                BCS   DSUBTR6    ; SUBTRACTION WHEN CARRY IS SET
                CMP   DOR
-               BCC   DCONT
+               BCC   DLOOP7
 DSUBTR6        SBC   DOR
+               INC   DEND
+DLOOP7         ASL   DEND       ; DOUBLE SHIFT DIVIDEND
+               ROL              ; DEND+1 STILL IN ACCU!
+               BCS   DSUBTR7    ; SUBTRACTION WHEN CARRY IS SET
+               CMP   DOR
+               BCC   DLOOP8
+DSUBTR7        SBC   DOR
+               INC   DEND
+DLOOP8         ASL   DEND       ; DOUBLE SHIFT DIVIDEND
+               ROL              ; DEND+1 STILL IN ACCU!
+               BCS   DSUBTR8    ; SUBTRACTION WHEN CARRY IS SET
+               CMP   DOR
+               BCC   DCONT
+DSUBTR8        SBC   DOR
                INC   DEND
 
 *
@@ -921,21 +943,45 @@ DEND           DS    2
 DOR            DS    1
 *
 ********************************
-* 8-BIT UNSIGNED MULTIPL       *
+* 8-BIT UNSIGNED FAST MULTIPLY *
 ********************************
 *
                CYC
 *
-UMULT          LDX   #$00       ; INITIALISE MSIGN = 0
-UMKCHK         LDA   MKAND      ; MKAND NEG?
-               BPL   UMTCHK
-               INX              ; INC X-REG FOR NEG SIGN
+UMULT          LDY   MKAND
+               STY   TEMP1      ; SAVE FOR LATER USE
+UMTCHK         LDA   MATOR
+               STA   TEMP2      ; SAVE FOR LATER USE
+               STA   PSHI
                EOR   #$FF
-               TAY
-               INY
-               STY   MKAND
-UMTCHK         LDA   MATOR      ; MATOR NEG?
-               LDY   MKAND      ;
+               STA   PDHI
+               SEC
+               LDA   (PSHI),Y   ; GET (A+Y)^2/4 (HI-BYTE)
+               SBC   (PDHI),Y   ; SUBTRACT (-A+Y)^2/4 (HI-BYTE)
+*
+* STORE RESULTS
+*
+               LDY   TEMP1      ; CHECK IF MKAND < 0
+               BPL   UMDONE     ; NO -> ALL DONE
+               SEC              ; MATOR STILL IN ACCU!
+               SBC   TEMP2      ; SUBTRACT TEMP2 FROM MATOR
+*
+UMDONE         TAY              ; MOVE ACCU TO Y-REG AS RESULT
+               RTS
+*
+               CYC   OFF
+*
+*
+********************************
+* 8-BIT SIGNED COMPL MULTIPLY  *
+********************************
+*
+               CYC
+*
+MULT           LDY   MKAND
+               STY   TEMP1      ; SAVE FOR LATER USE
+MTCHK          LDA   MATOR
+               STA   TEMP2      ; SAVE FOR LATER USE
                STA   PSLO       ; INDEX INTO SUM TABLE BY A
                STA   PSHI
                EOR   #$FF
@@ -947,90 +993,58 @@ UMTCHK         LDA   MATOR      ; MATOR NEG?
                STA   MKAND      ; SAVE IT
                LDA   (PSHI),Y   ; GET (A+Y)^2/4 (HI-BYTE)
                SBC   (PDHI),Y   ; SUBTRACT (-A+Y)^2/4 (HI-BYTE)
-               STA   MATOR
 *
 * STORE RESULTS
 *
-               LDA   MKAND      ; MKAND = LO-BYTE
-               DEX              ; NEG SIGN FOR RESULT?
-               BNE   UMEND      ; NO SIGN IS POSITIVE -> END
-               EOR   #$FF       ; TWO'S COMPLEMENT  OF ACCU
-               CLC
-               ADC   #$01
-               STA   MKAND
-               LDA   MATOR
-               EOR   #$FF
-               ADC   #$00
-               STA   MATOR
-               TAY
-               LDA   MKAND      ; MKAND = LO-BYTE
-               RTS
-UMEND          LDY   MATOR      ; MATOR = HI-BYTE
+               LDY   TEMP1      ; CHECK IF MKAND < 0
+               BPL   CHKT2      ; NO CHECK MATOR
+               SEC              ; MATOR STILL IN ACCU!
+               SBC   TEMP2      ; SUBTRACT TEMP2 FROM MATOR
+*
+CHKT2          LDY   TEMP2      ; CHECK IF MATOR < 0
+               BPL   MDONE      ; NO, RTS
+               SEC              ; MATOR STILL IN ACCU
+               SBC   TEMP1      ; SUBTRACT TEMP1 FROM MATOR
+*
+MDONE          TAY              ; MOVE ACCU TO Y-REG AS RESULT
+               LDA   MKAND      ; LOAD LO BYTE
                RTS
 *
                CYC   OFF
 *
-*
 ********************************
-* 8-BIT SIGNED MULTIPLY        *
+* 8-BIT SIGNED FAST MULTIPLY   *
 ********************************
 *
                CYC
 *
-MULT           LDX   #$00       ; INITIALISE MSIGN = 0
-MKCHK          LDA   MKAND      ; MKAND NEG?
-               BPL   MTCHK
-               INX
-               EOR   #$FF       ; INC X-REG FOR NEG SIGN
-               TAY              ; TWO'S COMPLEMENT
-               INY
-               STY   MKAND
-MTCHK          LDA   MATOR      ; MATOR NEG?
-               BPL   MULTGO
-               INX
-               EOR   #$FF
-               TAY              ; INC X-REG FOR NEG SIGN
-               INY
-               STY   MATOR
-MULTGO         LDA   MATOR
-               LDY   MKAND      ;
-               STA   PSLO       ; INDEX INTO SUM TABLE BY A
+FMULT          LDY   MKAND
+               STY   TEMP1      ; SAVE FOR LATER USE
+FMTCHK         LDA   MATOR
+               STA   TEMP2      ; SAVE FOR LATER USE
                STA   PSHI
                EOR   #$FF
-               STA   PDLO       ; INDEX INTO DIFF TABLE BY -A-1
                STA   PDHI
-               LDA   (PSLO),Y   ; GET (A+Y)^2/4 (LO BYTE)
                SEC
-               SBC   (PDLO),Y   ; SUBTRACT (-A+Y)^2/4 (LO BYTE)
-               STA   MKAND      ; SAVE IT
                LDA   (PSHI),Y   ; GET (A+Y)^2/4 (HI-BYTE)
                SBC   (PDHI),Y   ; SUBTRACT (-A+Y)^2/4 (HI-BYTE)
-               STA   MATOR
 *
 * STORE RESULTS
 *
-               LDA   MKAND      ; MKAND = LO-BYTE
-               DEX              ; NEG SIGN FOR RESULT?
-               BNE   MEND       ; NO SIGN IS POSITIVE -> END
-               EOR   #$FF       ; TWO'S COMPLEMENT  OF ACCU
-               CLC
-               ADC   #$01
-               STA   MKAND
-               LDA   MATOR
-               EOR   #$FF
-               ADC   #$00
-               STA   MATOR
-               TAY
-               LDA   MKAND      ; MKAND = LO-BYTE
-               RTS
-MEND           LDY   MATOR      ; MATOR = HI-BYTE
+               LDY   TEMP1      ; CHECK IF MKAND < 0
+               BPL   FCHKT2     ; NO CHECK MATOR
+               SEC              ; MATOR STILL IN ACCU!
+               SBC   TEMP2      ; SUBTRACT TEMP2 FROM MATOR
+*
+FCHKT2         LDY   TEMP2      ; CHECK IF MATOR < 0
+               BPL   FMDONE     ; NO, RTS
+               SEC              ; MATOR STILL IN ACCU
+               SBC   TEMP1      ; SUBTRACT TEMP1 FROM MATOR
+*
+FMDONE         TAY              ; MOVE ACCU TO Y-REG AS RESULT
                RTS
 *
                CYC   OFF
-*
-MKAND          DS    1
-MATOR          DS    1
-MSIGN          DS    1
 *
 ********************************
 * TOP & BOTTOM TEXT MESSAGE    *
